@@ -11,6 +11,8 @@ use chrono::Local;
 use regex;
 use serde_json::Value;
 use std::collections::HashMap;
+use spreadsheet::Book;
+
 struct Data {} // User data, which is stored and accessible in all command invocations
 type Error = Box<dyn std::error::Error + Send + Sync>;
 type Context<'a> = poise::Context<'a, Data, Error>;
@@ -31,9 +33,7 @@ async fn age(
 struct Bot {
     channel_id: serenity::model::id::ChannelId,
     expenses_channel_id: serenity::model::id::ChannelId,
-    expenses_spreadsheet_id: String,
-    google_credentials_json: String,
-    user_id_map: HashMap<u64, String>,
+    book: Book,
 }
 
 #[async_trait]
@@ -60,7 +60,7 @@ impl EventHandler for Bot {
             }
             let today = Local::now().format("%Y/%m/%d").to_string();
             let user_name = match msg.author.id {
-                id if self.user_id_map.contains_key(&id.into()) => self.user_id_map[&id.into()].clone(),
+                id if self.book.users.0.contains_key(&id.into()) => self.book.users.0[&id.into()].clone(),
                 _ => "".to_string(),
             };
 
@@ -74,9 +74,10 @@ impl EventHandler for Bot {
             ]];
             let year = Local::now().format("%Y").to_string();
             let month = Local::now().format("%m").to_string();
-            let row = spreadsheet::get_last_row(&self.google_credentials_json, &self.expenses_spreadsheet_id, format!("日々の記録（{}.{}）!A16:C", year, month).as_str()).await.unwrap() + 16;
+            let range = format!("日々の記録（{}.{}）!A16:C", year, month);
+            let row = self.book.get_last_row(&range).await.unwrap() + 16;
             let range = format!("日々の記録（{}.{}）!A{}", year, month, row);
-            if let Err(e) = spreadsheet::write_text(&self.google_credentials_json, &self.expenses_spreadsheet_id, &range, values).await {
+            if let Err(e) = self.book.write_text(&range, values).await {
                 eprintln!("Error writing to spreadsheet: {:?}", e);
             }
         }
@@ -130,15 +131,15 @@ async fn serenity(
         .get("EXPENSES_SPREADSHEET_ID")
         .context("'EXPENSES_SPREADSHEET_ID' was not found")?;
 
-    let google_credentials_json = secrets
+    let credentials = secrets
         .get("GOOGLE_CREDENTIALS_JSON")
         .context("'GOOGLE_CREDENTIALS_JSON' was not found")?;
 
     let user_id_map = secrets
         .get("USER_ID_MAP")
         .context("'USER_ID_MAP' was not found")?;
-    let user_id_map: HashMap<u64, String> = serde_json::from_str(&user_id_map).unwrap();
-    println!("user_id_map: {:?}", user_id_map);
+    let users: HashMap<u64, String> = serde_json::from_str(&user_id_map).unwrap();
+    let book = Book::new(expenses_spreadsheet_id, users, credentials);
 
     let intents = GatewayIntents::GUILD_MESSAGES | GatewayIntents::MESSAGE_CONTENT;
 
@@ -157,7 +158,7 @@ async fn serenity(
 
     let client = serenity::ClientBuilder::new(token, intents)
         .framework(framework)
-        .event_handler(Bot { channel_id, expenses_channel_id, expenses_spreadsheet_id, google_credentials_json, user_id_map })
+        .event_handler(Bot { channel_id, expenses_channel_id, book })
         .await
         .unwrap();
 
