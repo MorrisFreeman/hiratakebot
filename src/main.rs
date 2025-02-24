@@ -36,49 +36,73 @@ struct Bot {
     book: Book,
 }
 
+impl Bot {
+    async fn write_expenses(&self, msg: Message) -> Result<(), anyhow::Error> {
+        let input_text = msg.content;
+        let re = regex::Regex::new(r"([^\d]+)\s*(\d+)").unwrap();
+        let text_part: String;
+        let parsed_number: i32;
+
+        let captures = match re.captures(input_text.as_str()) {
+            Some(captures) => captures,
+            None => return Err(anyhow::anyhow!("Invalid input format")),
+        };
+        text_part = captures.get(1).map(|m| m.as_str()).unwrap_or("").to_string();
+        parsed_number = captures.get(2).map(|m| m.as_str()).unwrap_or("0").parse().unwrap_or(0);
+
+        let today = Local::now().format("%Y/%m/%d").to_string();
+        let user_name = match msg.author.id {
+            id if self.book.users.0.contains_key(&id.into()) => self.book.users.0[&id.into()].clone(),
+            _ => "".to_string(),
+        };
+
+        let values: Vec<Vec<Value>> = vec![vec![
+            Value::String(today),
+            Value::String(text_part),
+            Value::Number(parsed_number.into()),
+            Value::Null,
+            Value::String(user_name),
+        ]];
+        let year = Local::now().format("%Y").to_string();
+        let month = Local::now().format("%m").to_string();
+        let range = format!("日々の記録（{}.{}）!A16:C", year, month);
+        let row = self.book.get_last_row(&range).await.unwrap() + 16;
+
+        let range = format!("日々の記録（{}.{}）!A{}", year, month, row);
+        if let Err(e) = self.book.write_text(&range, values).await {
+            eprintln!("Error writing to spreadsheet: {:?}", e);
+        };
+
+        Ok(())
+    }
+}
+
 #[async_trait]
 impl EventHandler for Bot {
     async fn message(&self, ctx: serenity::Context, msg: Message) {
+        // メッセージの送信者がボット自身なら無視
+        if msg.author.bot {
+            return;
+        }
+
         if msg.content == "!hello" {
             if let Err(e) = msg.channel_id.say(&ctx.http, "world!!!!!").await {
-                error!("Error sending message: {:?}", e);
+                error!("Error sending message: {:?}", anyhow::Error::new(e));
             }
         }
 
         if msg.channel_id == self.expenses_channel_id {
-            let input_text = msg.content;
-            let re = regex::Regex::new(r"([^\d]+)\s*(\d+)").unwrap();
-            let text_part: String;
-            let parsed_number: i32;
-            if let Some(captures) = re.captures(input_text.as_str()) {
-                text_part = captures.get(1).map(|m| m.as_str()).unwrap_or("").to_string();
-                let number_str = captures.get(2).map(|m| m.as_str()).unwrap_or("0");
-                parsed_number = number_str.parse().unwrap_or(0);
-            } else {
-                text_part = "".to_string();
-                parsed_number = 0;
-            }
-            let today = Local::now().format("%Y/%m/%d").to_string();
-            let user_name = match msg.author.id {
-                id if self.book.users.0.contains_key(&id.into()) => self.book.users.0[&id.into()].clone(),
-                _ => "".to_string(),
-            };
-
-            let values: Vec<Vec<Value>> = vec![vec![
-                Value::String(today),
-                Value::String(text_part),
-                Value::Number(parsed_number.into()),
-                Value::Null,
-                Value::String(user_name),
-
-            ]];
-            let year = Local::now().format("%Y").to_string();
-            let month = Local::now().format("%m").to_string();
-            let range = format!("日々の記録（{}.{}）!A16:C", year, month);
-            let row = self.book.get_last_row(&range).await.unwrap() + 16;
-            let range = format!("日々の記録（{}.{}）!A{}", year, month, row);
-            if let Err(e) = self.book.write_text(&range, values).await {
-                eprintln!("Error writing to spreadsheet: {:?}", e);
+            match self.write_expenses(msg.clone()).await {
+                Ok(_) => {
+                    if let Err(e) = msg.reply(&ctx.http, format!("記録しました")).await {
+                        error!("Error sending reply: {:?}", anyhow::Error::new(e));
+                    }
+                },
+                Err(e) => {
+                    if let Err(e) = msg.reply(&ctx.http, format!("エラーが発生しました: {:?}", e)).await {
+                        error!("Error sending reply: {:?}", anyhow::Error::new(e));
+                    }
+                }
             }
         }
     }
