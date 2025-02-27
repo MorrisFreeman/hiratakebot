@@ -1,4 +1,5 @@
 mod spreadsheet;
+mod http_server;
 
 use anyhow::Context as _;
 use serenity::async_trait;
@@ -11,6 +12,8 @@ use chrono::Local;
 use regex;
 use serde_json::Value;
 use std::collections::HashMap;
+use std::sync::Arc;
+use tokio::sync::Mutex;
 use spreadsheet::Book;
 
 struct Data {} // User data, which is stored and accessible in all command invocations
@@ -185,6 +188,18 @@ async fn serenity(
         .event_handler(Bot { channel_id, expenses_channel_id, book })
         .await
         .unwrap();
+
+    // HTTPサーバーとDiscordクライアントで共有するコンテキスト
+    let http_context = client.http.clone();
+    let shared_channel_id = channel_id;
+
+    // HTTPサーバーを別スレッドで起動
+    tokio::spawn(async move {
+        println!("HTTPサーバーを起動します。以下のURLでアクセスできます:");
+        println!("- ローカル開発環境: http://localhost:3000");
+        println!("- Shuttle環境: https://hiratakebot-j09j.shuttle.app");
+        http_server::start_server(http_context, shared_channel_id).await;
+    });
 
     Ok(client.into())
 }
