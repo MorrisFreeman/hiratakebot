@@ -195,9 +195,6 @@ async fn serenity(
 
     // HTTPサーバーを別スレッドで起動
     tokio::spawn(async move {
-        println!("HTTPサーバーを起動します。以下のURLでアクセスできます:");
-        println!("- ローカル開発環境: http://localhost:3000");
-        println!("- Shuttle環境: https://hiratakebot-j09j.shuttle.app");
         http_server::start_server(http_context, shared_channel_id).await;
     });
 

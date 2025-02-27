@@ -60,7 +60,7 @@ pub async fn start_server(http_context: Arc<Http>, channel_id: ChannelId) {
           send_message(payload, http_context.clone(), channel_id)
       }));
 
-  let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await.unwrap();
+  let listener = tokio::net::TcpListener::bind("0.0.0.0").await.unwrap();
   println!("HTTPサーバーを起動: {:?}", listener);
   axum::serve(listener, app).await.unwrap();
 }
